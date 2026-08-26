@@ -1,0 +1,227 @@
+"""
+OE1 - Caracterizacion del fraude (2023-2025) - SEGMENTO DE INTERES
+Visualizaciones esteticas para tesis de maestria.
+Autor: para Juan Pablo Duque Giraldo
+"""
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.ticker import FuncFormatter
+
+# ----------------------------------------------------------------------
+# 0. Cargar datos (solo bloque con fecha valida = segmento de interes)
+# ----------------------------------------------------------------------
+SRC = "/mnt/user-data/uploads/cifras_problema.xlsx"
+df = pd.read_excel(SRC, sheet_name=0)
+df.columns = [c.strip() for c in df.columns]
+df["fecha"] = pd.to_datetime(df["fecha"], dayfirst=True, errors="coerce")
+df = df[df["fecha"].notna()].sort_values("fecha").reset_index(drop=True)
+
+# Derivadas
+df["tasa_reclamo_cli"] = df["cnt_reclamos"] / df["cnt_clientes"]
+df["ratio_prom_med"]   = df["prom_mnt_fraude"] / df["p50_mnt_fraude"]
+
+# ----------------------------------------------------------------------
+# Estetica global
+# ----------------------------------------------------------------------
+INK    = "#1d2433"
+GRID   = "#e7e9ee"
+BG     = "#ffffff"
+TEAL   = "#0d7d7d"
+CORAL  = "#e8663c"
+AMBER  = "#f2a541"
+NAVY   = "#22314e"
+GREY   = "#9aa3b2"
+
+plt.rcParams.update({
+    "figure.facecolor": BG, "axes.facecolor": BG,
+    "axes.edgecolor": "#c7ccd6", "axes.linewidth": 0.8,
+    "axes.titlecolor": INK, "axes.labelcolor": INK, "text.color": INK,
+    "xtick.color": INK, "ytick.color": INK, "font.size": 11,
+    "font.family": "DejaVu Sans",
+    "axes.spines.top": False, "axes.spines.right": False,
+    "axes.grid": True, "grid.color": GRID, "grid.linewidth": 1.0,
+})
+
+def cop(x, pos=None):
+    if x >= 1e12: return f"${x/1e12:.1f} B"
+    if x >= 1e9:  return f"${x/1e9:.1f} MM"
+    if x >= 1e6:  return f"${x/1e6:.1f} M"
+    if x >= 1e3:  return f"${x/1e3:.0f} k"
+    return f"${x:.0f}"
+
+def miles(x, pos=None):
+    return f"{x/1e3:.0f}k" if x >= 1e3 else f"{x:.0f}"
+
+def year_bands(ax):
+    for yr, col in zip([2023, 2024, 2025], ["#f6f8fa", "#ffffff", "#f6f8fa"]):
+        ax.axvspan(pd.Timestamp(yr,1,1), pd.Timestamp(yr,12,31), color=col, zorder=0)
+
+def style_dates(ax):
+    ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1,7]))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b\n%Y"))
+    ax.tick_params(axis="x", labelsize=9)
+
+x = df["fecha"]
+
+# ======================================================================
+# FIG 1 - Panel de magnitud y evolucion (2x2)
+# ======================================================================
+fig, axs = plt.subplots(2, 2, figsize=(15, 9))
+fig.suptitle("Fraude bancario 2023-2025 - segmento de interes - magnitud y evolucion",
+             fontsize=17, fontweight="bold", x=0.02, ha="left", y=0.985)
+fig.text(0.02, 0.945,
+         "Panel mensual de reclamos de fraude - segmento seleccionado - elaboracion propia (OE1)",
+         fontsize=11, color=GREY, ha="left")
+
+ax = axs[0,0]
+year_bands(ax)
+ax.fill_between(x, df["cnt_reclamos"], color=TEAL, alpha=.12)
+ax.plot(x, df["cnt_reclamos"], color=TEAL, lw=2.6, label="Reclamos", zorder=3)
+ax.plot(x, df["cnt_clientes"], color=CORAL, lw=2.0, ls=(0,(4,2)), label="Clientes unicos", zorder=3)
+ax.set_title("a) Volumen de reclamos y clientes afectados", fontweight="bold", loc="left", fontsize=13)
+ax.yaxis.set_major_formatter(FuncFormatter(miles))
+ax.legend(frameon=False, loc="upper left", fontsize=10)
+style_dates(ax)
+g = df["cnt_reclamos"].iloc[-1]/df["cnt_reclamos"].iloc[0]-1
+ax.annotate(f"+{g*100:.0f}% vs. ene-2023",
+            xy=(x.iloc[-1], df["cnt_reclamos"].iloc[-1]),
+            xytext=(-10, 18), textcoords="offset points",
+            fontsize=9.5, color=TEAL, fontweight="bold", ha="right")
+
+ax = axs[0,1]
+year_bands(ax)
+bars = ax.bar(x, df["mnt_fraude"], width=22, color=NAVY, alpha=.85)
+imax = df["mnt_fraude"].idxmax()
+bars[imax].set_color(CORAL)
+ax.set_title("b) Monto total defraudado por mes", fontweight="bold", loc="left", fontsize=13)
+ax.yaxis.set_major_formatter(FuncFormatter(cop))
+style_dates(ax)
+ax.annotate(f"Pico: {cop(df['mnt_fraude'].max())}\n{x[imax]:%b %Y}",
+            xy=(x[imax], df["mnt_fraude"].max()),
+            xytext=(-6, 6), textcoords="offset points",
+            fontsize=9, color=CORAL, fontweight="bold", ha="right")
+
+ax = axs[1,0]
+year_bands(ax)
+ax.plot(x, df["prom_mnt_fraude"], color=CORAL, lw=2.6, label="Promedio")
+ax.plot(x, df["p50_mnt_fraude"],  color=TEAL,  lw=2.6, label="Mediana")
+ax.fill_between(x, df["p50_mnt_fraude"], df["prom_mnt_fraude"], color=AMBER, alpha=.18)
+ax.set_title("c) Ticket del fraude: promedio vs. mediana", fontweight="bold", loc="left", fontsize=13)
+ax.yaxis.set_major_formatter(FuncFormatter(cop))
+ax.legend(frameon=False, loc="upper right", fontsize=10)
+style_dates(ax)
+ax.annotate("Brecha = asimetria\n(colas pesadas)",
+            xy=(x.iloc[18], (df["prom_mnt_fraude"].iloc[18]+df["p50_mnt_fraude"].iloc[18])/2),
+            xytext=(8, 26), textcoords="offset points", fontsize=9, color="#b9822c", fontweight="bold")
+
+ax = axs[1,1]
+year_bands(ax)
+ax.plot(x, df["tasa_reclamo_cli"], color=TEAL, lw=2.6)
+ax.fill_between(x, 1, df["tasa_reclamo_cli"], color=TEAL, alpha=.12)
+ax.set_title("d) Intensidad: reclamos por cliente afectado", fontweight="bold", loc="left", fontsize=13)
+ax.axhline(1.0, color=GREY, lw=1, ls=":")
+style_dates(ax)
+ax.yaxis.set_major_formatter(FuncFormatter(lambda v,p: f"{v:.2f}"))
+
+plt.tight_layout(rect=[0, 0, 1, 0.93])
+plt.savefig("/mnt/user-data/outputs/fig1_panel_magnitud.png", dpi=200, bbox_inches="tight")
+plt.close()
+
+# ======================================================================
+# FIG 2 - Fan chart de percentiles
+# ======================================================================
+fig, ax = plt.subplots(figsize=(14, 7.5))
+year_bands(ax)
+ax.fill_between(x, df["p25_mnt_fraude"], df["p75_mnt_fraude"], color=TEAL, alpha=.28, label="p25-p75 (rango intercuartilico)")
+ax.fill_between(x, df["p75_mnt_fraude"], df["p95_mnt_fraude"], color=AMBER, alpha=.25, label="p75-p95")
+ax.fill_between(x, df["p95_mnt_fraude"], df["p99_mnt_fraude"], color=CORAL, alpha=.22, label="p95-p99 (cola alta)")
+ax.plot(x, df["p50_mnt_fraude"], color=NAVY, lw=2.8, label="Mediana (p50)", zorder=5)
+ax.plot(x, df["p99_mnt_fraude"], color=CORAL, lw=1.6, ls=(0,(3,2)), label="p99")
+ax.set_yscale("log")
+ax.yaxis.set_major_formatter(FuncFormatter(cop))
+ax.set_title("Distribucion del monto de fraude por mes (escala log) - segmento de interes",
+             fontsize=15, fontweight="bold", loc="left")
+fig.text(0.125, 0.90,
+         "Cada banda muestra donde cae el monto de los reclamos: la cola alta (p95-p99) concentra el riesgo economico",
+         fontsize=10.5, color=GREY)
+style_dates(ax)
+ax.legend(frameon=False, ncol=2, loc="upper right", fontsize=10)
+ax.grid(axis="x", alpha=0)
+imx = df["p99_mnt_fraude"].idxmax()
+ax.annotate("Pico de la cola p99",
+            xy=(x.iloc[imx], df["p99_mnt_fraude"].iloc[imx]),
+            xytext=(-30, -95), textcoords="offset points",
+            fontsize=10, color=CORAL, fontweight="bold", ha="right",
+            arrowprops=dict(arrowstyle="->", color=CORAL, lw=1.4, connectionstyle="arc3,rad=-0.25"))
+plt.tight_layout()
+plt.savefig("/mnt/user-data/outputs/fig2_fanchart_percentiles.png", dpi=200, bbox_inches="tight")
+plt.close()
+
+# ======================================================================
+# FIG 3 - Heatmap calendario
+# ======================================================================
+piv = df.pivot_table(index=df["fecha"].dt.year, columns=df["fecha"].dt.month, values="cnt_reclamos")
+meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+cmap = LinearSegmentedColormap.from_list("teal_seq",
+        ["#f2f9f9", "#cfe9e6", "#8fcfc7", "#4fa9a0", "#1d7d75", "#f2a541", "#e8663c"])
+fig, ax = plt.subplots(figsize=(13, 3.8))
+im = ax.imshow(piv.values, cmap=cmap, aspect="auto")
+ax.set_xticks(range(12)); ax.set_xticklabels(meses)
+ax.set_yticks(range(len(piv.index))); ax.set_yticklabels(piv.index, fontweight="bold")
+ax.set_title("Reclamos de fraude - mapa de calor mensual - segmento de interes",
+             fontsize=15, fontweight="bold", loc="left", pad=14)
+mean_v = np.nanmean(piv.values)
+for i in range(piv.shape[0]):
+    for j in range(piv.shape[1]):
+        v = piv.values[i, j]
+        if not np.isnan(v):
+            ax.text(j, i, f"{v/1e3:.0f}k", ha="center", va="center",
+                    fontsize=8.5, color="white" if v > mean_v else INK, fontweight="bold")
+ax.set_xticks(np.arange(-.5,12,1), minor=True)
+ax.set_yticks(np.arange(-.5,len(piv.index),1), minor=True)
+ax.grid(which="minor", color=BG, linewidth=3)
+ax.tick_params(which="minor", length=0)
+ax.grid(which="major", alpha=0)
+cb = fig.colorbar(im, ax=ax, pad=0.01, fraction=0.045)
+cb.outline.set_visible(False)
+cb.ax.set_ylabel("Reclamos", rotation=270, labelpad=15, fontsize=10)
+plt.tight_layout()
+plt.savefig("/mnt/user-data/outputs/fig3_heatmap_calendario.png", dpi=200, bbox_inches="tight")
+plt.close()
+
+# ======================================================================
+# FIG 4 - Asimetria: ratio promedio/mediana
+# ======================================================================
+fig, ax = plt.subplots(figsize=(14, 6))
+year_bands(ax)
+colors = [CORAL if v >= df["ratio_prom_med"].median() else TEAL for v in df["ratio_prom_med"]]
+ax.bar(x, df["ratio_prom_med"], width=22, color=colors, alpha=.9)
+ax.axhline(df["ratio_prom_med"].mean(), color=NAVY, lw=1.4, ls="--",
+           label=f"Promedio del periodo ({df['ratio_prom_med'].mean():.1f}x)")
+ax.set_title("Asimetria del fraude: cuantas veces la media supera a la mediana - segmento de interes",
+             fontsize=14, fontweight="bold", loc="left")
+fig.text(0.125, 0.90,
+         "Valores altos = pocos fraudes muy grandes jalan el promedio - distribucion de cola pesada",
+         fontsize=10.5, color=GREY)
+ax.yaxis.set_major_formatter(FuncFormatter(lambda v,p: f"{v:.0f}x"))
+ax.legend(frameon=False, loc="upper left", fontsize=10)
+style_dates(ax)
+ax.grid(axis="x", alpha=0)
+plt.tight_layout()
+plt.savefig("/mnt/user-data/outputs/fig4_asimetria.png", dpi=200, bbox_inches="tight")
+plt.close()
+
+# ----------------------------------------------------------------------
+print("=== Resumen OE1 - segmento de interes ===")
+print(f"Meses: {len(df)}  ({x.min():%b %Y} a {x.max():%b %Y})")
+print(f"Total reclamos: {df['cnt_reclamos'].sum():,.0f}")
+print(f"Monto total: {cop(df['mnt_fraude'].sum())}")
+print(f"Reclamos: min {df['cnt_reclamos'].min():,} ({x[df['cnt_reclamos'].idxmin()]:%b %Y}) "
+      f"-> max {df['cnt_reclamos'].max():,} ({x[df['cnt_reclamos'].idxmax()]:%b %Y})")
+print(f"Crecimiento reclamos ene2023->dic2025: {g*100:.0f}%")
+print(f"Ratio media/mediana: {df['ratio_prom_med'].min():.1f}x a {df['ratio_prom_med'].max():.1f}x")
+print(f"p99 max: {cop(df['p99_mnt_fraude'].max())} en {x[df['p99_mnt_fraude'].idxmax()]:%b %Y}")
+print("Figuras guardadas en /mnt/user-data/outputs/")

@@ -1,0 +1,295 @@
+"""
+====================================================================
+ ANALISIS DESCRIPTIVO OE1 - TESIS MAESTRIA
+ Caracterizacion de FRAUDE y DESERCION (2023-2025)
+ Autor: Juan Pablo Duque Giraldo
+--------------------------------------------------------------------
+ Genera:
+   FRAUDE:     fig1_panel_magnitud, fig2_fanchart, fig3_heatmap, fig4_asimetria
+   DESERCION:  deser_A_control, deser_B_mortalidad, deser_C_estacional
+   PUENTE:     deser_F_fraude_vs_desercion  (antesala del DiD)
+--------------------------------------------------------------------
+ Requisitos: pandas, numpy, matplotlib, openpyxl
+ Uso:  python analisis_oe1_completo.py
+       (ajusta la ruta SRC a tu archivo Excel)
+====================================================================
+"""
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.ticker import FuncFormatter
+
+# ====================================================================
+# 0. CONFIGURACION
+# ====================================================================
+SRC = "/mnt/user-data/uploads/cifras_problema.xlsx"   # <-- AJUSTA ESTA RUTA
+OUT = "/mnt/user-data/outputs"                         # <-- CARPETA DE SALIDA
+
+# ---- Paleta y estilo global (sobrio, estilo APA) ----
+INK="#1d2433"; GRID="#e7e9ee"; BG="#ffffff"
+TEAL="#0d7d7d"; CORAL="#e8663c"; AMBER="#f2a541"; NAVY="#22314e"; GREY="#9aa3b2"; PLUM="#7d4f9c"
+
+plt.rcParams.update({
+    "figure.facecolor":BG,"axes.facecolor":BG,"axes.edgecolor":"#c7ccd6",
+    "axes.linewidth":0.8,"axes.titlecolor":INK,"axes.labelcolor":INK,"text.color":INK,
+    "xtick.color":INK,"ytick.color":INK,"font.size":11,"font.family":"DejaVu Sans",
+    "axes.spines.top":False,"axes.spines.right":False,
+    "axes.grid":True,"grid.color":GRID,"grid.linewidth":1.0})
+
+def cop(x, pos=None):
+    if x>=1e12: return f"${x/1e12:.1f} B"
+    if x>=1e9:  return f"${x/1e9:.1f} MM"
+    if x>=1e6:  return f"${x/1e6:.1f} M"
+    if x>=1e3:  return f"${x/1e3:.0f} k"
+    return f"${x:.0f}"
+
+def miles(x, pos=None):
+    return f"{x/1e3:.0f}k" if x>=1e3 else f"{x:.0f}"
+
+def yrbands(ax):
+    for yr,c in zip([2023,2024,2025],["#f6f8fa","#ffffff","#f6f8fa"]):
+        ax.axvspan(pd.Timestamp(yr,1,1),pd.Timestamp(yr,12,31),color=c,zorder=0)
+
+def sdates(ax):
+    ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1,7]))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b\n%Y"))
+    ax.tick_params(axis="x",labelsize=9)
+
+# ====================================================================
+# 1. CARGA DE DATOS
+# ====================================================================
+# ---- Hoja de FRAUDE (solo filas con fecha valida) ----
+fr = pd.read_excel(SRC, sheet_name="cifras_fraude")
+fr.columns=[c.strip() for c in fr.columns]
+fr["fecha"]=pd.to_datetime(fr["fecha"], dayfirst=True, errors="coerce")
+fr=fr[fr["fecha"].notna()].sort_values("fecha").reset_index(drop=True)
+fr["tasa_reclamo_cli"]=fr["cnt_reclamos"]/fr["cnt_clientes"]
+fr["ratio_prom_med"]=fr["prom_mnt_fraude"]/fr["p50_mnt_fraude"]
+
+# ---- Hoja de DESERCION (3 bloques apilados) ----
+raw = pd.read_excel(SRC, sheet_name="desertores", header=None)
+# bloque distribucion antiguedad (filas 4-8, cols 0-2)
+dist = raw.iloc[4:9, 0:3].copy(); dist.columns=["rango","n","pct"]
+dist["n"]=pd.to_numeric(dist["n"]); dist["pct"]=pd.to_numeric(dist["pct"])*100
+dist["acum"]=dist["pct"].cumsum()
+# bloque serie mensual (filas 11+, cols 0-3)
+serie = raw.iloc[11:, 0:4].copy(); serie.columns=["fecha","base","des","tasa"]
+serie["fecha"]=pd.to_datetime(serie["fecha"])
+serie["base"]=pd.to_numeric(serie["base"]); serie["des"]=pd.to_numeric(serie["des"])
+serie["tasa"]=pd.to_numeric(serie["tasa"])*100
+serie=serie.sort_values("fecha").reset_index(drop=True)
+serie["anio"]=serie["fecha"].dt.year; serie["mes"]=serie["fecha"].dt.month
+
+x  = fr["fecha"]
+xs = serie["fecha"]
+
+# ====================================================================
+# 2. FRAUDE - FIG 1: Panel magnitud y evolucion (2x2)
+# ====================================================================
+fig,axs=plt.subplots(2,2,figsize=(15,9))
+fig.suptitle("Fraude bancario 2023-2025 - segmento de interes - magnitud y evolucion",
+             fontsize=17,fontweight="bold",x=0.02,ha="left",y=0.985)
+fig.text(0.02,0.945,"Panel mensual de reclamos de fraude - elaboracion propia (OE1)",
+         fontsize=11,color=GREY,ha="left")
+# a) volumen
+ax=axs[0,0]; yrbands(ax)
+ax.fill_between(x,fr["cnt_reclamos"],color=TEAL,alpha=.12)
+ax.plot(x,fr["cnt_reclamos"],color=TEAL,lw=2.6,label="Reclamos",zorder=3)
+ax.plot(x,fr["cnt_clientes"],color=CORAL,lw=2.0,ls=(0,(4,2)),label="Clientes unicos",zorder=3)
+ax.set_title("a) Volumen de reclamos y clientes afectados",fontweight="bold",loc="left",fontsize=13)
+ax.yaxis.set_major_formatter(FuncFormatter(miles)); ax.legend(frameon=False,loc="upper left",fontsize=10); sdates(ax)
+g=fr["cnt_reclamos"].iloc[-1]/fr["cnt_reclamos"].iloc[0]-1
+ax.annotate(f"+{g*100:.0f}% vs. ene-2023",xy=(x.iloc[-1],fr["cnt_reclamos"].iloc[-1]),
+            xytext=(-10,18),textcoords="offset points",fontsize=9.5,color=TEAL,fontweight="bold",ha="right")
+# b) monto total
+ax=axs[0,1]; yrbands(ax)
+bars=ax.bar(x,fr["mnt_fraude"],width=22,color=NAVY,alpha=.85)
+imax=fr["mnt_fraude"].idxmax(); bars[imax].set_color(CORAL)
+ax.set_title("b) Monto total defraudado por mes",fontweight="bold",loc="left",fontsize=13)
+ax.yaxis.set_major_formatter(FuncFormatter(cop)); sdates(ax)
+ax.annotate(f"Pico: {cop(fr['mnt_fraude'].max())}\n{x[imax]:%b %Y}",xy=(x[imax],fr["mnt_fraude"].max()),
+            xytext=(-6,6),textcoords="offset points",fontsize=9,color=CORAL,fontweight="bold",ha="right")
+# c) ticket
+ax=axs[1,0]; yrbands(ax)
+ax.plot(x,fr["prom_mnt_fraude"],color=CORAL,lw=2.6,label="Promedio")
+ax.plot(x,fr["p50_mnt_fraude"],color=TEAL,lw=2.6,label="Mediana")
+ax.fill_between(x,fr["p50_mnt_fraude"],fr["prom_mnt_fraude"],color=AMBER,alpha=.18)
+ax.set_title("c) Ticket del fraude: promedio vs. mediana",fontweight="bold",loc="left",fontsize=13)
+ax.yaxis.set_major_formatter(FuncFormatter(cop)); ax.legend(frameon=False,loc="upper right",fontsize=10); sdates(ax)
+ax.annotate("Brecha = asimetria\n(colas pesadas)",xy=(x.iloc[18],(fr["prom_mnt_fraude"].iloc[18]+fr["p50_mnt_fraude"].iloc[18])/2),
+            xytext=(8,26),textcoords="offset points",fontsize=9,color="#b9822c",fontweight="bold")
+# d) intensidad
+ax=axs[1,1]; yrbands(ax)
+ax.plot(x,fr["tasa_reclamo_cli"],color=TEAL,lw=2.6)
+ax.fill_between(x,1,fr["tasa_reclamo_cli"],color=TEAL,alpha=.12)
+ax.set_title("d) Intensidad: reclamos por cliente afectado",fontweight="bold",loc="left",fontsize=13)
+ax.axhline(1.0,color=GREY,lw=1,ls=":"); sdates(ax)
+ax.yaxis.set_major_formatter(FuncFormatter(lambda v,p:f"{v:.2f}"))
+plt.tight_layout(rect=[0,0,1,0.93])
+plt.savefig(f"{OUT}/fig1_panel_magnitud.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 3. FRAUDE - FIG 2: Fan chart de percentiles
+# ====================================================================
+fig,ax=plt.subplots(figsize=(14,7.5)); yrbands(ax)
+ax.fill_between(x,fr["p25_mnt_fraude"],fr["p75_mnt_fraude"],color=TEAL,alpha=.28,label="p25-p75 (RIC)")
+ax.fill_between(x,fr["p75_mnt_fraude"],fr["p95_mnt_fraude"],color=AMBER,alpha=.25,label="p75-p95")
+ax.fill_between(x,fr["p95_mnt_fraude"],fr["p99_mnt_fraude"],color=CORAL,alpha=.22,label="p95-p99 (cola alta)")
+ax.plot(x,fr["p50_mnt_fraude"],color=NAVY,lw=2.8,label="Mediana (p50)",zorder=5)
+ax.plot(x,fr["p99_mnt_fraude"],color=CORAL,lw=1.6,ls=(0,(3,2)),label="p99")
+ax.set_yscale("log"); ax.yaxis.set_major_formatter(FuncFormatter(cop))
+ax.set_title("Distribucion del monto de fraude por mes (escala log)",fontsize=15,fontweight="bold",loc="left")
+sdates(ax); ax.legend(frameon=False,ncol=2,loc="upper right",fontsize=10); ax.grid(axis="x",alpha=0)
+plt.tight_layout(); plt.savefig(f"{OUT}/fig2_fanchart_percentiles.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 4. FRAUDE - FIG 3: Heatmap calendario reclamos
+# ====================================================================
+piv=fr.pivot_table(index=fr["fecha"].dt.year,columns=fr["fecha"].dt.month,values="cnt_reclamos")
+meses=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+cmap=LinearSegmentedColormap.from_list("seq",["#f2f9f9","#cfe9e6","#8fcfc7","#4fa9a0","#1d7d75","#f2a541","#e8663c"])
+fig,ax=plt.subplots(figsize=(13,3.8)); im=ax.imshow(piv.values,cmap=cmap,aspect="auto")
+ax.set_xticks(range(12)); ax.set_xticklabels(meses)
+ax.set_yticks(range(len(piv.index))); ax.set_yticklabels(piv.index,fontweight="bold")
+ax.set_title("Reclamos de fraude - mapa de calor mensual",fontsize=15,fontweight="bold",loc="left",pad=14)
+mv=np.nanmean(piv.values)
+for i in range(piv.shape[0]):
+    for j in range(piv.shape[1]):
+        v=piv.values[i,j]
+        if not np.isnan(v):
+            ax.text(j,i,f"{v/1e3:.0f}k",ha="center",va="center",fontsize=8.5,
+                    color="white" if v>mv else INK,fontweight="bold")
+ax.set_xticks(np.arange(-.5,12,1),minor=True); ax.set_yticks(np.arange(-.5,len(piv.index),1),minor=True)
+ax.grid(which="minor",color=BG,linewidth=3); ax.tick_params(which="minor",length=0); ax.grid(which="major",alpha=0)
+cb=fig.colorbar(im,ax=ax,pad=0.01,fraction=0.045); cb.outline.set_visible(False)
+cb.ax.set_ylabel("Reclamos",rotation=270,labelpad=15,fontsize=10)
+plt.tight_layout(); plt.savefig(f"{OUT}/fig3_heatmap_calendario.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 5. FRAUDE - FIG 4: Asimetria media/mediana
+# ====================================================================
+fig,ax=plt.subplots(figsize=(14,6)); yrbands(ax)
+colors=[CORAL if v>=fr["ratio_prom_med"].median() else TEAL for v in fr["ratio_prom_med"]]
+ax.bar(x,fr["ratio_prom_med"],width=22,color=colors,alpha=.9)
+ax.axhline(fr["ratio_prom_med"].mean(),color=NAVY,lw=1.4,ls="--",
+           label=f"Promedio del periodo ({fr['ratio_prom_med'].mean():.1f}x)")
+ax.set_title("Asimetria del fraude: cuantas veces la media supera a la mediana",fontsize=14,fontweight="bold",loc="left")
+ax.yaxis.set_major_formatter(FuncFormatter(lambda v,p:f"{v:.0f}x"))
+ax.legend(frameon=False,loc="upper left",fontsize=10); sdates(ax); ax.grid(axis="x",alpha=0)
+plt.tight_layout(); plt.savefig(f"{OUT}/fig4_asimetria.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 6. DESERCION - A: Serie con banda de control estadistico
+# ====================================================================
+mu=serie["tasa"].mean(); sd=serie["tasa"].std()
+fig,ax=plt.subplots(figsize=(14,7)); yrbands(ax)
+ax.axhspan(mu-2*sd,mu+2*sd,color=TEAL,alpha=.08,label="Banda normal (media +/- 2 sigma)")
+ax.axhline(mu,color=GREY,lw=1.2,ls="--",label=f"Media {mu:.2f}%")
+ax.plot(xs,serie["tasa"],color=TEAL,lw=2.6,zorder=4)
+anom=serie[serie["tasa"]>mu+2*sd]
+ax.scatter(anom["fecha"],anom["tasa"],color=CORAL,s=120,zorder=6,label="Anomalia (> +2 sigma)")
+for _,r in anom.iterrows():
+    ax.annotate(f"{r['fecha']:%b %Y}\n{r['tasa']:.2f}%",xy=(r["fecha"],r["tasa"]),
+                xytext=(0,16),textcoords="offset points",fontsize=9,color=CORAL,fontweight="bold",ha="center")
+ax.set_title("Tasa de desercion mensual con banda de control estadistico",fontsize=16,fontweight="bold",loc="left")
+ax.yaxis.set_major_formatter(FuncFormatter(lambda v,p:f"{v:.1f}%"))
+ax.legend(frameon=False,loc="upper left",fontsize=9.5,ncol=2); sdates(ax); ax.grid(axis="x",alpha=0)
+plt.tight_layout(); plt.savefig(f"{OUT}/deser_A_control.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 7. DESERCION - B: Curva de mortalidad + Pareto por antiguedad
+# ====================================================================
+fig,ax=plt.subplots(figsize=(13,7))
+cbar=[CORAL,AMBER,"#c7b34a",TEAL,NAVY]
+bars=ax.bar(dist["rango"],dist["pct"],color=cbar,alpha=.9,width=.62,zorder=3)
+for b,p in zip(bars,dist["pct"]):
+    ax.text(b.get_x()+b.get_width()/2,p+0.6,f"{p:.1f}%",ha="center",fontweight="bold",fontsize=11,color=INK)
+ax.set_ylabel("% de desertores"); ax.set_ylim(0,38)
+ax2=ax.twinx(); ax2.grid(False)
+ax2.plot(dist["rango"],dist["acum"],color=PLUM,lw=2.8,marker="o",ms=9,zorder=5)
+for xi,ac in zip(range(len(dist)),dist["acum"]):
+    ax2.annotate(f"{ac:.0f}%",xy=(xi,ac),xytext=(0,12),textcoords="offset points",
+                 fontsize=9.5,color=PLUM,fontweight="bold",ha="center")
+ax2.set_ylabel("% acumulado",color=PLUM); ax2.tick_params(axis="y",colors=PLUM); ax2.set_ylim(0,108)
+ax2.axhline(58,color=PLUM,lw=1,ls=":",alpha=.6)
+ax.set_title("Curva de mortalidad del cliente: a que edad de la relacion deserta?",fontsize=15.5,fontweight="bold",loc="left")
+plt.tight_layout(); plt.savefig(f"{OUT}/deser_B_mortalidad.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 8. DESERCION - C: Heatmap estacional mes x anio
+# ====================================================================
+pivd=serie.pivot_table(index="anio",columns="mes",values="tasa")
+fig,ax=plt.subplots(figsize=(13,3.8)); im=ax.imshow(pivd.values,cmap=cmap,aspect="auto")
+ax.set_xticks(range(12)); ax.set_xticklabels(meses)
+ax.set_yticks(range(len(pivd.index))); ax.set_yticklabels(pivd.index,fontweight="bold")
+ax.set_title("Tasa de desercion - mapa de calor estacional (mes x anio)",fontsize=15,fontweight="bold",loc="left",pad=14)
+mvd=np.nanmean(pivd.values)
+for i in range(pivd.shape[0]):
+    for j in range(pivd.shape[1]):
+        v=pivd.values[i,j]
+        if not np.isnan(v):
+            ax.text(j,i,f"{v:.2f}",ha="center",va="center",fontsize=8.5,
+                    color="white" if v>mvd else INK,fontweight="bold")
+ax.set_xticks(np.arange(-.5,12,1),minor=True); ax.set_yticks(np.arange(-.5,len(pivd.index),1),minor=True)
+ax.grid(which="minor",color=BG,linewidth=3); ax.tick_params(which="minor",length=0); ax.grid(which="major",alpha=0)
+cb=fig.colorbar(im,ax=ax,pad=0.01,fraction=0.045); cb.outline.set_visible(False)
+cb.ax.set_ylabel("Tasa %",rotation=270,labelpad=15,fontsize=10)
+plt.tight_layout(); plt.savefig(f"{OUT}/deser_C_estacional.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 9. PUENTE - F: Fraude vs Desercion superpuestos + correlacion rezagada
+#    (antesala visual del analisis DiD)
+# ====================================================================
+m=pd.merge(fr[["fecha","cnt_reclamos"]],serie[["fecha","tasa"]],on="fecha").sort_values("fecha").reset_index(drop=True)
+# correlaciones con rezago k = fraude(t) vs desercion(t+k)
+lags=range(0,7); corrs=[]
+for k in lags:
+    if k==0:
+        corrs.append(m["cnt_reclamos"].corr(m["tasa"]))
+    else:
+        corrs.append(m["cnt_reclamos"][:-k].reset_index(drop=True).corr(m["tasa"][k:].reset_index(drop=True)))
+
+fig,(axL,axR)=plt.subplots(1,2,figsize=(16,6.5),gridspec_kw={"width_ratios":[2.4,1]})
+
+# --- panel izquierdo: doble eje ---
+yrbands(axL)
+l1=axL.plot(m["fecha"],m["cnt_reclamos"],color=CORAL,lw=2.6,label="Reclamos de fraude")[0]
+axL.set_ylabel("Reclamos de fraude",color=CORAL); axL.tick_params(axis="y",colors=CORAL)
+axL.yaxis.set_major_formatter(FuncFormatter(miles))
+axLr=axL.twinx(); axLr.grid(False)
+l2=axLr.plot(m["fecha"],m["tasa"],color=TEAL,lw=2.6,label="Tasa de desercion")[0]
+axLr.set_ylabel("Tasa de desercion (%)",color=TEAL); axLr.tick_params(axis="y",colors=TEAL)
+axLr.yaxis.set_major_formatter(FuncFormatter(lambda v,p:f"{v:.1f}%"))
+axL.set_title("a) Fraude y desercion en el tiempo",fontsize=14,fontweight="bold",loc="left")
+axL.legend(handles=[l1,l2],frameon=False,loc="upper left",fontsize=10); sdates(axL)
+
+# --- panel derecho: correlacion cruzada rezagada ---
+axR.grid(axis="x",alpha=0)
+kmax=int(np.argmax(corrs))
+barsR=axR.bar(list(lags),corrs,color=[CORAL if k==kmax else TEAL for k in lags],alpha=.9)
+axR.axhline(0,color=GREY,lw=1)
+for k,c in zip(lags,corrs):
+    axR.annotate(f"{c:.2f}",xy=(k,c),xytext=(0,4 if c>=0 else -12),textcoords="offset points",
+                 fontsize=9,ha="center",fontweight="bold",color=INK)
+axR.set_xlabel("Rezago k (meses): fraude(t) vs desercion(t+k)")
+axR.set_ylabel("Correlacion")
+axR.set_title("b) Correlacion cruzada rezagada",fontsize=14,fontweight="bold",loc="left")
+axR.set_xticks(list(lags))
+fig.suptitle("Relacion fraude - desercion: antesala del analisis causal (DiD)",
+             fontsize=16,fontweight="bold",x=0.02,ha="left",y=1.0)
+plt.tight_layout(rect=[0,0,1,0.96])
+plt.savefig(f"{OUT}/deser_F_fraude_vs_desercion.png",dpi=200,bbox_inches="tight"); plt.close()
+
+# ====================================================================
+# 10. RESUMEN EN CONSOLA
+# ====================================================================
+print("=== RESUMEN OE1 ===")
+print(f"[FRAUDE]    meses={len(fr)}  reclamos_tot={fr['cnt_reclamos'].sum():,.0f}  monto_tot={cop(fr['mnt_fraude'].sum())}")
+print(f"[DESERCION] tasa media={mu:.2f}%  min={serie['tasa'].min():.2f}%  max={serie['tasa'].max():.2f}%")
+print(f"[DESERCION] anomalias (>+2sd): {list(anom['fecha'].dt.strftime('%b %Y'))}")
+print(f"[ANTIGUEDAD] churn temprano (<=3 anios) = {dist['pct'].iloc[0]+dist['pct'].iloc[1]:.1f}%")
+print(f"[PUENTE F]  correlacion por rezago (0..6): {[round(c,3) for c in corrs]}")
+print(f"[PUENTE F]  rezago de mayor correlacion: +{kmax} mes (r={corrs[kmax]:.3f})")
+print("Figuras guardadas en:", OUT)
